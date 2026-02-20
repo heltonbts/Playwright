@@ -1,0 +1,78 @@
+# --- Python Basics ---
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Virtual Environments (O que você pediu) ---
+# Ignora pastas comuns de ambiente virtual
+.venv
+.venv/
+venv/
+env/
+ENV/
+
+# --- Environment Variables (Segurança) ---
+# Nunca suba suas chaves de API ou senhas
+.env
+.env.local
+.env.*
+
+# --- Logs e Databases ---
+*.log
+*.sqlite
+*.db
+
+# --- Playwright (Específico para seu uso) ---
+# Binários dos navegadores (caso instale localmente) e relatórios de teste
+/test-results/
+/playwright-report/
+/blob-report/
+playwright/.cache/
+
+# --- Selenium / Webdrivers ---
+# Logs de drivers comuns
+geckodriver.log
+msedgedriver.log
+chromedriver.log
+
+# --- IDEs / Editores ---
+# VS Code
+.vscode/
+# JetBrains (PyCharm)
+.idea/
+
+# --- Distribution / Builds (Se for criar executável depois) ---
+build/
+dist/
+*.egg-info/
+.installer/
+
+# --- OS Files ---
+.DS_Store
+Thumbs.db
+
+# --- Frontend (Next.js) ---
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.vercel
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+frontend/.env.development
+
+# --- Arquivos de Resultado (Dados Sensíveis) ---
+# Excel com dados de multas
+*.xlsx
+resultado_detran_*.xlsx
+resultado_detran_organizado.xlsx
+
+# PDFs de boletos
+boletos/
+*.pdf
+
+# --- Temporários ---
+execucao.log
+*.tmp
+*.bak
