@@ -38,6 +38,9 @@ const iniciarViaFetch = async (url: string, veiculos: Veiculo[]): Promise<{ cons
 
 export default function NovaConsulta() {
   const router = useRouter();
+  const isLocalDev =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState('');
   const [veiculosAtivos, setVeiculosAtivos] = useState<Veiculo[]>([
@@ -72,6 +75,10 @@ export default function NovaConsulta() {
         const { consulta_id } = await withTimeout(iniciarConsulta(veiculosAtivos), 15000);
         consultaId = consulta_id;
       } catch (primeiroErro) {
+        if (!isLocalDev) {
+          throw primeiroErro;
+        }
+
         console.warn('Falha na tentativa principal. Tentando proxy local...', primeiroErro);
         try {
           const { consulta_id } = await withTimeout(
@@ -99,7 +106,9 @@ export default function NovaConsulta() {
       console.error('Erro ao iniciar consulta:', error);
       const mensagemErro = error.response?.data?.detail 
         || error.message 
-        || 'Erro ao iniciar consulta. Verifique backend em http://localhost:8000 e frontend em http://localhost:3000';
+        || (isLocalDev
+          ? 'Erro ao iniciar consulta. Verifique backend em http://localhost:8000 e frontend em http://localhost:3000'
+          : 'Erro ao iniciar consulta. Verifique NEXT_PUBLIC_API_URL e CORS do backend para o domínio publicado.');
       setErro(mensagemErro);
     } finally {
       setLoading(false);

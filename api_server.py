@@ -23,6 +23,25 @@ from playwright.sync_api import sync_playwright
 
 app = FastAPI(title="DETRAN-CE API", version="1.0.0")
 
+
+def _build_allowed_origins() -> List[str]:
+    origins = {
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:3002",
+        "https://samuelforte.github.io",
+        "https://samuelforte.github.io/Playwright",
+    }
+
+    extra_origins = os.getenv("ALLOWED_ORIGINS", "")
+    if extra_origins:
+        for origin in extra_origins.split(","):
+            normalized = origin.strip().rstrip("/")
+            if normalized:
+                origins.add(normalized)
+
+    return sorted(origins)
+
 # ===== Supabase Client =====
 SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
 SUPABASE_KEY = (
@@ -52,7 +71,7 @@ MULTAS_MEM: Dict[str, List[Dict[str, Any]]] = {}
 # CORS para permitir frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=_build_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
