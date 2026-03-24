@@ -31,7 +31,7 @@ export default function Historico() {
   });
 
   const handleVerConsulta = (consultaId: string) => {
-    router.push(`/resultados/${consultaId}`);
+    router.push(`/resultados?id=${consultaId}`);
   };
 
   const formatarData = (dataString: string) => {

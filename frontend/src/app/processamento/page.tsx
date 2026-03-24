@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import React, { Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Box,
   Typography,
@@ -22,34 +22,41 @@ import Layout from '@/components/Layout';
 import ProcessStatus from '@/components/ProcessStatus';
 import { obterStatus, VeiculoStatus } from '@/lib/api';
 
-export default function Processamento() {
-  const params = useParams();
+function ProcessamentoContent() {
   const router = useRouter();
-  const consultaId = params.id as string;
+  const searchParams = useSearchParams();
+  const consultaId = searchParams.get('id') || '';
 
   const { data, isError, error } = useQuery({
     queryKey: ['status', consultaId],
     queryFn: () => obterStatus(consultaId),
-    refetchInterval: (data: any) => {
-      // Para de atualizar quando completar ou dar erro
-      if (!data || data.status === 'completed' || data.status === 'error') {
+    refetchInterval: (queryData: any) => {
+      if (!queryData || queryData.status === 'completed' || queryData.status === 'error') {
         return false;
       }
-      return 2000; // Atualiza a cada 2 segundos
+      return 2000;
     },
     enabled: !!consultaId,
+    retry: 3,
   });
 
   const handleVerResultados = () => {
-    router.push(`/resultados/${consultaId}`);
+    router.push(`/resultados?id=${consultaId}`);
   };
 
-  if (isError) {
+  if (!consultaId) {
     return (
       <Layout>
-        <Alert severity="error">
-          Erro ao carregar status: {(error as Error).message}
-        </Alert>
+        <Alert severity="warning">Consulta não informada. Volte e inicie uma nova consulta.</Alert>
+      </Layout>
+    );
+  }
+
+  if (isError) {
+    const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+    return (
+      <Layout>
+        <Alert severity="error">Erro ao carregar status: {errorMessage}</Alert>
       </Layout>
     );
   }
@@ -109,10 +116,7 @@ export default function Processamento() {
                 <TableRow key={index}>
                   <TableCell sx={{ fontWeight: 600 }}>{veiculo.placa}</TableCell>
                   <TableCell>
-                    <ProcessStatus
-                      status={veiculo.status}
-                      mensagem={veiculo.mensagem}
-                    />
+                    <ProcessStatus status={veiculo.status} mensagem={veiculo.mensagem} />
                   </TableCell>
                   <TableCell>{veiculo.multas_count || '-'}</TableCell>
                   <TableCell>
@@ -144,5 +148,13 @@ export default function Processamento() {
         </Box>
       )}
     </Layout>
+  );
+}
+
+export default function Processamento() {
+  return (
+    <Suspense fallback={<Layout><Alert severity="info">Carregando...</Alert></Layout>}>
+      <ProcessamentoContent />
+    </Suspense>
   );
 }

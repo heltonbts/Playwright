@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
-import { useParams } from 'next/navigation';
+import React, { Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { addDays, differenceInCalendarDays, parse } from 'date-fns';
 import {
   Box,
@@ -12,7 +12,6 @@ import {
   Paper,
 } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
-import DownloadIcon from '@mui/icons-material/Download';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import TableViewIcon from '@mui/icons-material/TableView';
 import Layout from '@/components/Layout';
@@ -35,18 +34,12 @@ const dentroPrazoIndicacao = (dataNotificacao: string) => {
   if (!data) return false;
   const hoje = new Date();
   const diff = differenceInCalendarDays(hoje, data);
-  return diff >= 0 && diff <= 15;
+  return diff >= 0 && diff <= 30;
 };
 
-const prazoIndicacao = (dataNotificacao: string) => {
-  const data = parseDataBR(dataNotificacao);
-  if (!data) return null;
-  return addDays(data, 15);
-};
-
-export default function Resultados() {
-  const params = useParams();
-  const consultaId = params.id as string;
+function ResultadosContent() {
+  const searchParams = useSearchParams();
+  const consultaId = searchParams.get('id') || '';
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['resultado', consultaId],
@@ -54,7 +47,6 @@ export default function Resultados() {
     enabled: !!consultaId,
   });
 
-  // Salva multas no localStorage para o dashboard poder exibir notificações
   React.useEffect(() => {
     if (data?.multas && data.multas.length > 0) {
       localStorage.setItem('ultimas_multas', JSON.stringify(data.multas));
@@ -64,22 +56,28 @@ export default function Resultados() {
   const handleBaixarExcel = async () => {
     try {
       await baixarExcel(consultaId);
-    } catch (error) {
-      console.error('Erro ao baixar Excel:', error);
+    } catch (downloadError) {
+      console.error('Erro ao baixar Excel:', downloadError);
     }
   };
 
   const handleBaixarPDF = async (ait: string) => {
     try {
-      // Implementar lógica para encontrar o PDF correto pelo AIT
-      // Por enquanto, apenas um exemplo
       if (data?.pdf_paths && data.pdf_paths.length > 0) {
         await baixarPDF(consultaId, data.pdf_paths[0]);
       }
-    } catch (error) {
-      console.error('Erro ao baixar PDF:', error);
+    } catch (downloadError) {
+      console.error('Erro ao baixar PDF:', downloadError);
     }
   };
+
+  if (!consultaId) {
+    return (
+      <Layout>
+        <Alert severity="warning">Consulta não informada. Volte e selecione uma consulta.</Alert>
+      </Layout>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -94,9 +92,7 @@ export default function Resultados() {
   if (isError) {
     return (
       <Layout>
-        <Alert severity="error">
-          Erro ao carregar resultados: {(error as Error).message}
-        </Alert>
+        <Alert severity="error">Erro ao carregar resultados: {(error as Error).message}</Alert>
       </Layout>
     );
   }
@@ -107,23 +103,6 @@ export default function Resultados() {
   const placasAptas = Array.from(
     new Set(multas.filter(m => dentroPrazoIndicacao(m.data_infracao)).map(m => m.placa))
   );
-  const prazosPorPlaca = (() => {
-    const map = new Map<string, { notificacao: Date; prazo: Date }>();
-    multas.forEach(m => {
-      const notificacao = parseDataBR(m.data_infracao);
-      if (!notificacao) return;
-      const prazo = addDays(notificacao, 15);
-      const atual = map.get(m.placa);
-      if (!atual || notificacao > atual.notificacao) {
-        map.set(m.placa, { notificacao, prazo });
-      }
-    });
-    return Array.from(map.entries()).map(([placa, valores]) => ({
-      placa,
-      notificacao: valores.notificacao,
-      prazo: valores.prazo,
-    }));
-  })();
 
   const formatarValor = (valor: number) => {
     return new Intl.NumberFormat('pt-BR', {
@@ -145,20 +124,10 @@ export default function Resultados() {
 
       <Grid container spacing={3} sx={{ mb: 4 }}>
         <Grid item xs={12} md={4}>
-          <StatusCard
-            title="Multas Encontradas"
-            value={totalMultas}
-            icon={<WarningAmberIcon />}
-            color="warning"
-          />
+          <StatusCard title="Multas Encontradas" value={totalMultas} icon={<WarningAmberIcon />} color="warning" />
         </Grid>
         <Grid item xs={12} md={4}>
-          <StatusCard
-            title="Valor Total"
-            value={formatarValor(valorTotal)}
-            icon={<AttachMoneyIcon />}
-            color="error"
-          />
+          <StatusCard title="Valor Total" value={formatarValor(valorTotal)} icon={<AttachMoneyIcon />} color="error" />
         </Grid>
         <Grid item xs={12} md={4}>
           <StatusCard
@@ -172,12 +141,7 @@ export default function Resultados() {
 
       <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
         <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-          <Button
-            variant="contained"
-            startIcon={<TableViewIcon />}
-            onClick={handleBaixarExcel}
-            size="large"
-          >
+          <Button variant="contained" startIcon={<TableViewIcon />} onClick={handleBaixarExcel} size="large">
             Baixar Excel
           </Button>
           <Button
@@ -185,30 +149,20 @@ export default function Resultados() {
             startIcon={<PictureAsPdfIcon />}
             size="large"
             disabled={!data?.pdf_paths || data.pdf_paths.length === 0}
+            onClick={() => handleBaixarPDF('')}
           >
-            Baixar Todos os PDFs
+            Baixar PDF
           </Button>
         </Box>
       </Paper>
 
       {placasAptas.length > 0 && (
         <Alert severity="success" sx={{ mb: 3 }}>
-          <Typography fontWeight={600} sx={{ mb: prazosPorPlaca.length ? 1 : 0 }}>
+          <Typography fontWeight={600}>
             {placasAptas.length === 1
-              ? `O veículo ${placasAptas[0]} está apto a indicar condutor (até 15 dias da notificação).`
-              : `Os veículos ${placasAptas.join(', ')} estão aptos a indicar condutor (até 15 dias da notificação).`}
+              ? `O veículo ${placasAptas[0]} está apto a indicar condutor (até 30 dias da notificação).`
+              : `Os veículos ${placasAptas.join(', ')} estão aptos a indicar condutor (até 30 dias da notificação).`}
           </Typography>
-          {prazosPorPlaca.length > 0 && (
-            <Box component="ul" sx={{ pl: 2, mb: 0, mt: 0.5 }}>
-              {prazosPorPlaca.map(item => (
-                <Box component="li" key={item.placa} sx={{ lineHeight: 1.4 }}>
-                  <Typography variant="body2">
-                    {item.placa}: notificação em {item.notificacao.toLocaleDateString('pt-BR')} • prazo até {item.prazo.toLocaleDateString('pt-BR')}
-                  </Typography>
-                </Box>
-              ))}
-            </Box>
-          )}
         </Alert>
       )}
 
@@ -222,5 +176,13 @@ export default function Resultados() {
         <MultasTable multas={multas} onDownloadPDF={handleBaixarPDF} />
       )}
     </Layout>
+  );
+}
+
+export default function Resultados() {
+  return (
+    <Suspense fallback={<Layout><Alert severity="info">Carregando...</Alert></Layout>}>
+      <ResultadosContent />
+    </Suspense>
   );
 }

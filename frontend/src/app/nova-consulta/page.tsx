@@ -94,7 +94,7 @@ export default function NovaConsulta() {
       }
 
       console.log('Consulta iniciada com sucesso. ID:', consultaId);
-      router.push(`/processamento/${consultaId}`);
+      router.push(`/processamento?id=${consultaId}`);
     } catch (error: any) {
       console.error('Erro ao iniciar consulta:', error);
       const mensagemErro = error.response?.data?.detail 
