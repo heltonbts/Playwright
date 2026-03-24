@@ -17,11 +17,17 @@ const withTimeout = async <T,>(promise: Promise<T>, timeoutMs = 15000): Promise<
 };
 
 const iniciarViaFetch = async (url: string, veiculos: Veiculo[]): Promise<{ consulta_id: string }> => {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ veiculos }),
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ veiculos }),
+    });
+  } catch {
+    throw new Error(`Falha de conexão com a API (${url}). Verifique se o backend está ativo e com CORS liberado.`);
+  }
 
   const data = await response.json().catch(() => ({}));
 
@@ -104,8 +110,17 @@ export default function NovaConsulta() {
       router.push(`/processamento?id=${consultaId}`);
     } catch (error: any) {
       console.error('Erro ao iniciar consulta:', error);
+      const rawMessage = String(error?.message || '');
+      const isNetworkError =
+        rawMessage.toLowerCase().includes('failed to fetch')
+        || rawMessage.toLowerCase().includes('network error');
+
       const mensagemErro = error.response?.data?.detail 
-        || error.message 
+        || (isNetworkError
+          ? (isLocalDev
+            ? 'Sem conexão com o backend local. Confirme se a API está em http://localhost:8000.'
+            : 'Sem conexão com o backend público. Configure NEXT_PUBLIC_API_URL com a URL correta e valide CORS no backend.')
+          : error.message)
         || (isLocalDev
           ? 'Erro ao iniciar consulta. Verifique backend em http://localhost:8000 e frontend em http://localhost:3000'
           : 'Erro ao iniciar consulta. Verifique NEXT_PUBLIC_API_URL e CORS do backend para o domínio publicado.');
