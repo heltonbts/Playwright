@@ -1,11 +1,11 @@
 import axios from 'axios';
-import { supabase } from './supabaseClient';
+import { getSupabaseClient } from './supabaseClient';
 
 // Usar API Routes do Vercel como proxy (no servidor)
 // Em desenvolvimento usa localhost diretamente
 const API_BASE_URL = typeof window === 'undefined' 
   ? (process.env.BACKEND_URL || 'http://localhost:8000')
-  : (process.env.NEXT_PUBLIC_API_URL || '/api/proxy');
+  : '/api/proxy';
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -13,6 +13,8 @@ export const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+const API_FALLBACK_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export interface Veiculo {
   placa: string;
@@ -123,20 +125,51 @@ export const obterVeiculosConfig = async () => {
 
 // Iniciar nova consulta
 export const iniciarConsulta = async (veiculos: Veiculo[]) => {
-  const response = await api.post<{ consulta_id: string }>('/consultas', { veiculos });
-  return response.data;
+  try {
+    const response = await api.post<{ consulta_id: string }>('/consultas', { veiculos });
+    return response.data;
+  } catch (proxyError) {
+    if (typeof window === 'undefined') {
+      throw proxyError;
+    }
+
+    const response = await axios.post<{ consulta_id: string }>(
+      `${API_FALLBACK_URL}/consultas`,
+      { veiculos },
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+    return response.data;
+  }
 };
 
 // Obter status da consulta
 export const obterStatus = async (consultaId: string) => {
-  const response = await api.get<ConsultaStatus>(`/consultas/${consultaId}/status`);
-  return response.data;
+  try {
+    const response = await api.get<ConsultaStatus>(`/consultas/${consultaId}/status`);
+    return response.data;
+  } catch (proxyError) {
+    if (typeof window === 'undefined') {
+      throw proxyError;
+    }
+
+    const response = await axios.get<ConsultaStatus>(`${API_FALLBACK_URL}/consultas/${consultaId}/status`);
+    return response.data;
+  }
 };
 
 // Obter resultado da consulta
 export const obterResultado = async (consultaId: string) => {
-  const response = await api.get<ConsultaResultado>(`/consultas/${consultaId}/resultado`);
-  return response.data;
+  try {
+    const response = await api.get<ConsultaResultado>(`/consultas/${consultaId}/resultado`);
+    return response.data;
+  } catch (proxyError) {
+    if (typeof window === 'undefined') {
+      throw proxyError;
+    }
+
+    const response = await axios.get<ConsultaResultado>(`${API_FALLBACK_URL}/consultas/${consultaId}/resultado`);
+    return response.data;
+  }
 };
 
 // Baixar Excel
@@ -177,6 +210,7 @@ export const listarHistorico = async () => {
 
 // ===== Condutores =====
 export const listarCondutores = async () => {
+  const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('condutores')
     .select('*')
@@ -187,6 +221,7 @@ export const listarCondutores = async () => {
 };
 
 export const criarCondutor = async (condutor: Omit<Condutor, 'id'>) => {
+  const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('condutores')
     .insert(condutor)
@@ -198,6 +233,7 @@ export const criarCondutor = async (condutor: Omit<Condutor, 'id'>) => {
 };
 
 export const removerCondutor = async (condutorId: string) => {
+  const supabase = getSupabaseClient();
   const { error } = await supabase
     .from('condutores')
     .delete()
@@ -220,6 +256,7 @@ export const salvarVeiculoRegistro = async (veiculo: VeiculoRegistro) => {
 
 // ===== Indicações =====
 export const registrarIndicacao = async (payload: IndicacaoRequest) => {
+  const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('indicacoes')
     .insert({

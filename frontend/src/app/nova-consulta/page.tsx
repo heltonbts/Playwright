@@ -7,6 +7,35 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import Layout from '@/components/Layout';
 import { Veiculo, iniciarConsulta } from '@/lib/api';
 
+const withTimeout = async <T,>(promise: Promise<T>, timeoutMs = 15000): Promise<T> => {
+  return await Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error('Tempo limite ao iniciar consulta.')), timeoutMs)
+    ),
+  ]);
+};
+
+const iniciarViaFetch = async (url: string, veiculos: Veiculo[]): Promise<{ consulta_id: string }> => {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ veiculos }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data?.detail || data?.error || `Falha ao iniciar consulta (${response.status}).`);
+  }
+
+  if (!data?.consulta_id) {
+    throw new Error('API não retornou o identificador da consulta.');
+  }
+
+  return data as { consulta_id: string };
+};
+
 export default function NovaConsulta() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -37,15 +66,42 @@ export default function NovaConsulta() {
 
     try {
       console.log('Iniciando consulta com veículos:', veiculosAtivos);
-      const { consulta_id } = await iniciarConsulta(veiculosAtivos);
-      console.log('Consulta iniciada com sucesso. ID:', consulta_id);
-      router.push(`/processamento/${consulta_id}`);
+      let consultaId: string | null = null;
+
+      try {
+        const { consulta_id } = await withTimeout(iniciarConsulta(veiculosAtivos), 15000);
+        consultaId = consulta_id;
+      } catch (primeiroErro) {
+        console.warn('Falha na tentativa principal. Tentando proxy local...', primeiroErro);
+        try {
+          const { consulta_id } = await withTimeout(
+            iniciarViaFetch('/api/proxy/consultas', veiculosAtivos),
+            15000
+          );
+          consultaId = consulta_id;
+        } catch (segundoErro) {
+          console.warn('Falha no proxy local. Tentando backend direto...', segundoErro);
+          const { consulta_id } = await withTimeout(
+            iniciarViaFetch('http://localhost:8000/consultas', veiculosAtivos),
+            15000
+          );
+          consultaId = consulta_id;
+        }
+      }
+
+      if (!consultaId) {
+        throw new Error('Não foi possível obter o ID da consulta.');
+      }
+
+      console.log('Consulta iniciada com sucesso. ID:', consultaId);
+      router.push(`/processamento/${consultaId}`);
     } catch (error: any) {
       console.error('Erro ao iniciar consulta:', error);
       const mensagemErro = error.response?.data?.detail 
         || error.message 
-        || 'Erro ao iniciar consulta. Verifique se o backend está rodando em http://localhost:8000';
+        || 'Erro ao iniciar consulta. Verifique backend em http://localhost:8000 e frontend em http://localhost:3000';
       setErro(mensagemErro);
+    } finally {
       setLoading(false);
     }
   };

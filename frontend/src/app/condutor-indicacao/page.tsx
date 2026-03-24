@@ -20,7 +20,7 @@ import {
 } from '@mui/material';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import Layout from '@/components/Layout';
-import { supabase } from '@/lib/supabaseClient';
+import { getSupabaseClient } from '@/lib/supabaseClient';
 
 interface Indicacao {
   id: string;
@@ -60,6 +60,7 @@ export default function CondutorIndicacaoPage() {
   const condutoresQuery = useQuery({
     queryKey: ['condutores'],
     queryFn: async () => {
+      const supabase = getSupabaseClient();
       const { data, error } = await supabase
         .from('condutores')
         .select('*')
@@ -73,6 +74,7 @@ export default function CondutorIndicacaoPage() {
   const buscarIndicacoes = async (condutorId: string) => {
     try {
       setCarregando(true);
+      const supabase = getSupabaseClient();
       const { data, error } = await supabase
         .from('indicacoes')
         .select('*')
@@ -95,6 +97,7 @@ export default function CondutorIndicacaoPage() {
 
     try {
       setCarregando(true);
+      const supabase = getSupabaseClient();
       const { error } = await supabase
         .from('indicacoes')
         .update({

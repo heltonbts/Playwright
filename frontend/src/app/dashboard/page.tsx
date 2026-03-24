@@ -24,6 +24,8 @@ import StatusCard from '@/components/StatusCard';
 import NotificacoesCondutor from '@/components/NotificacoesCondutor';
 import { Condutor, Veiculo, criarCondutor, listarCondutores, removerCondutor } from '@/lib/api';
 
+const PRAZO_INDICACAO_DIAS = 30;
+
 interface VeiculoComCondutor extends Veiculo {
   condutorId?: string;
 }
@@ -235,8 +237,8 @@ export default function Dashboard() {
             const data = m.data_infracao ? parseDataBR(m.data_infracao) : null;
             if (!data) return;
             const diff = differenceInCalendarDays(new Date(), data);
-            if (diff < 0 || diff > 15) return; // fora do prazo
-            const prazo = addDays(data, 15);
+            if (diff < 0 || diff > PRAZO_INDICACAO_DIAS) return; // fora do prazo
+            const prazo = addDays(data, PRAZO_INDICACAO_DIAS);
             const atual = map[m.placa];
             if (!atual || data > atual.notificacao) {
               map[m.placa] = { notificacao: data, prazo };
@@ -322,6 +324,19 @@ export default function Dashboard() {
     if (!Number.isNaN(parsed.getTime())) return parsed;
     const fallback = new Date(value);
     return Number.isNaN(fallback.getTime()) ? null : fallback;
+  };
+
+  const getPrazoIndicacao = (dataInfracao: string) => {
+    const dataNotificacao = parseDataBR(dataInfracao);
+    if (!dataNotificacao) {
+      return { apto: false, prazo: null as Date | null, diasRestantes: null as number | null };
+    }
+
+    const prazo = addDays(dataNotificacao, PRAZO_INDICACAO_DIAS);
+    const diasRestantes = differenceInCalendarDays(prazo, new Date());
+    const apto = diasRestantes >= 0;
+
+    return { apto, prazo, diasRestantes };
   };
 
   const multasFiltradas = multas.filter(m => {
@@ -752,6 +767,8 @@ export default function Dashboard() {
                       <TableCell sx={{ color: 'white', fontWeight: 600 }}>AIT</TableCell>
                       <TableCell sx={{ color: 'white', fontWeight: 600 }}>Descrição</TableCell>
                       <TableCell sx={{ color: 'white', fontWeight: 600 }}>Data Infração</TableCell>
+                      <TableCell sx={{ color: 'white', fontWeight: 600 }}>Prazo Indicação</TableCell>
+                      <TableCell sx={{ color: 'white', fontWeight: 600 }}>Data Vencimento</TableCell>
                       <TableCell sx={{ color: 'white', fontWeight: 600 }}>Valor</TableCell>
                       <TableCell sx={{ color: 'white', fontWeight: 600 }}>Valor a Pagar</TableCell>
                     </TableRow>
@@ -759,6 +776,11 @@ export default function Dashboard() {
                   <TableBody>
                     {multasFiltradas.map((multa, index) => (
                       <TableRow key={index} hover>
+                        {(() => {
+                          const prazoInfo = getPrazoIndicacao(multa.data_infracao);
+
+                          return (
+                            <>
                         <TableCell sx={{ fontWeight: 600 }}>
                           <Chip label={multa.placa} size="small" color="primary" variant="outlined" />
                         </TableCell>
@@ -769,10 +791,34 @@ export default function Dashboard() {
                           <Typography variant="body2">{multa.motivo}</Typography>
                         </TableCell>
                         <TableCell>{multa.data_infracao}</TableCell>
+                        <TableCell>
+                          {prazoInfo.prazo ? (
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                              <Chip
+                                label={prazoInfo.apto ? 'Apto para indicação' : 'Fora do prazo'}
+                                color={prazoInfo.apto ? 'success' : 'default'}
+                                size="small"
+                                variant={prazoInfo.apto ? 'filled' : 'outlined'}
+                              />
+                              <Typography variant="caption" color="text.secondary">
+                                Até {prazoInfo.prazo.toLocaleDateString('pt-BR')}
+                                {prazoInfo.apto && prazoInfo.diasRestantes !== null
+                                  ? ` (${prazoInfo.diasRestantes} dia${prazoInfo.diasRestantes !== 1 ? 's' : ''} restantes)`
+                                  : ''}
+                              </Typography>
+                            </Box>
+                          ) : (
+                            '-'
+                          )}
+                        </TableCell>
+                        <TableCell>{multa.data_vencimento || '-'}</TableCell>
                         <TableCell>{multa.valor}</TableCell>
                         <TableCell sx={{ fontWeight: 600, color: 'error.main' }}>
                           {multa.valor_a_pagar}
                         </TableCell>
+                            </>
+                          );
+                        })()}
                       </TableRow>
                     ))}
                   </TableBody>

@@ -33,10 +33,21 @@ SUPABASE_KEY = (
     or os.getenv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY")
 )
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise RuntimeError("Supabase credentials missing. Defina SUPABASE_URL e SUPABASE_SERVICE_KEY/KEY/ANON/PUBLISHABLE.")
+supabase: Optional[Client] = None
+SUPABASE_ENABLED = False
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        SUPABASE_ENABLED = True
+    except Exception as e:
+        print(f"⚠️ Supabase indisponível na inicialização. Usando memória local. Motivo: {e}")
+else:
+    print("⚠️ Supabase não configurado. Usando memória local para consultas.")
+
+CONSULTAS_MEM: Dict[str, Dict[str, Any]] = {}
+VEICULOS_CONSULTA_MEM: Dict[str, List[Dict[str, Any]]] = {}
+MULTAS_MEM: Dict[str, List[Dict[str, Any]]] = {}
 
 # CORS para permitir frontend
 app.add_middleware(
@@ -96,29 +107,21 @@ class IndicacaoRequest(BaseModel):
 
 # ================= FUNÇÕES AUXILIARES =================
 
-def _supabase_or_http_error():
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase client não inicializado")
+def _using_memory_db() -> bool:
+    return not SUPABASE_ENABLED or supabase is None
 
 
 def db_insert_consulta(consulta_id: str, veiculos: List[Veiculo]):
-    _supabase_or_http_error()
+    global SUPABASE_ENABLED
     now_iso = datetime.now().isoformat()
-
-    # Cria consulta
-    try:
-        resp = supabase.table("consultas").insert({
-            "id": consulta_id,
-            "status": "pending",
-            "total_multas": 0,
-            "valor_total": 0.0,
-            "created_at": now_iso,
-            "excel_path": None,
-        }).execute()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao criar consulta: {str(e)}")
-
-    # Cria status dos veículos
+    consulta_payload = {
+        "id": consulta_id,
+        "status": "pending",
+        "total_multas": 0,
+        "valor_total": 0.0,
+        "created_at": now_iso,
+        "excel_path": None,
+    }
     veiculos_rows = [{
         "consulta_id": consulta_id,
         "placa": v.placa,
@@ -128,15 +131,36 @@ def db_insert_consulta(consulta_id: str, veiculos: List[Veiculo]):
         "mensagem": "Aguardando processamento",
     } for v in veiculos]
 
+    if _using_memory_db():
+        CONSULTAS_MEM[consulta_id] = consulta_payload
+        VEICULOS_CONSULTA_MEM[consulta_id] = veiculos_rows
+        MULTAS_MEM[consulta_id] = []
+        return
+
+    # Cria consulta
     try:
-        resp_veic = supabase.table("veiculos_consulta").insert(veiculos_rows).execute()
+        supabase.table("consultas").insert(consulta_payload).execute()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao salvar veículos da consulta: {str(e)}")
+        print(f"⚠️ Falha no Supabase ao criar consulta. Fallback memória: {e}")
+        SUPABASE_ENABLED = False
+        CONSULTAS_MEM[consulta_id] = consulta_payload
+        VEICULOS_CONSULTA_MEM[consulta_id] = veiculos_rows
+        MULTAS_MEM[consulta_id] = []
+        return
+
+    try:
+        supabase.table("veiculos_consulta").insert(veiculos_rows).execute()
+    except Exception as e:
+        print(f"⚠️ Falha no Supabase ao salvar veículos. Fallback memória: {e}")
+        SUPABASE_ENABLED = False
+        CONSULTAS_MEM[consulta_id] = consulta_payload
+        VEICULOS_CONSULTA_MEM[consulta_id] = veiculos_rows
+        MULTAS_MEM[consulta_id] = []
 
 
 def db_update_consulta_status(consulta_id: str, status: str, excel_path: Optional[str] = None,
                               total_multas: Optional[int] = None, valor_total: Optional[float] = None):
-    _supabase_or_http_error()
+    global SUPABASE_ENABLED
     payload: Dict[str, Any] = {"status": status}
     if excel_path is not None:
         payload["excel_path"] = excel_path
@@ -145,22 +169,53 @@ def db_update_consulta_status(consulta_id: str, status: str, excel_path: Optiona
     if valor_total is not None:
         payload["valor_total"] = valor_total
 
+    if _using_memory_db():
+        consulta = CONSULTAS_MEM.get(consulta_id)
+        if not consulta:
+            raise HTTPException(status_code=404, detail="Consulta não encontrada")
+        consulta.update(payload)
+        return
+
     try:
-        resp = supabase.table("consultas").update(payload).eq("id", consulta_id).execute()
+        supabase.table("consultas").update(payload).eq("id", consulta_id).execute()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao atualizar consulta: {str(e)}")
+        print(f"⚠️ Falha no Supabase ao atualizar consulta. Fallback memória: {e}")
+        SUPABASE_ENABLED = False
+        consulta = CONSULTAS_MEM.get(consulta_id)
+        if not consulta:
+            raise HTTPException(status_code=404, detail="Consulta não encontrada")
+        consulta.update(payload)
 
 
 def db_update_veiculo_status(consulta_id: str, placa: str, data: Dict[str, Any]):
-    _supabase_or_http_error()
+    global SUPABASE_ENABLED
+    if _using_memory_db():
+        veiculos = VEICULOS_CONSULTA_MEM.get(consulta_id)
+        if not veiculos:
+            raise HTTPException(status_code=404, detail="Consulta não encontrada")
+        for veiculo in veiculos:
+            if veiculo.get("placa") == placa:
+                veiculo.update(data)
+                return
+        raise HTTPException(status_code=404, detail=f"Veículo {placa} não encontrado")
+
     try:
-        resp = supabase.table("veiculos_consulta").update(data).eq("consulta_id", consulta_id).eq("placa", placa).execute()
+        supabase.table("veiculos_consulta").update(data).eq("consulta_id", consulta_id).eq("placa", placa).execute()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao atualizar veículo {placa}: {str(e)}")
+        print(f"⚠️ Falha no Supabase ao atualizar veículo. Fallback memória: {e}")
+        SUPABASE_ENABLED = False
+        veiculos = VEICULOS_CONSULTA_MEM.get(consulta_id)
+        if not veiculos:
+            raise HTTPException(status_code=404, detail="Consulta não encontrada")
+        for veiculo in veiculos:
+            if veiculo.get("placa") == placa:
+                veiculo.update(data)
+                return
+        raise HTTPException(status_code=404, detail=f"Veículo {placa} não encontrado")
 
 
 def db_insert_multas(consulta_id: str, multas: List[Dict]):
-    _supabase_or_http_error()
+    global SUPABASE_ENABLED
     if not multas:
         return
     rows = []
@@ -180,19 +235,43 @@ def db_insert_multas(consulta_id: str, multas: List[Dict]):
             "codigo_pagamento": m.get("Código de pagamento em barra") or m.get("codigo_pagamento") or "-",
         })
 
+    if _using_memory_db():
+        MULTAS_MEM.setdefault(consulta_id, []).extend(rows)
+        return
+
     try:
-        resp = supabase.table("multas").insert(rows).execute()
+        supabase.table("multas").insert(rows).execute()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao salvar multas: {str(e)}")
+        print(f"⚠️ Falha no Supabase ao inserir multas. Fallback memória: {e}")
+        SUPABASE_ENABLED = False
+        MULTAS_MEM.setdefault(consulta_id, []).extend(rows)
 
 
 def db_get_consulta_com_status(consulta_id: str) -> Dict[str, Any]:
-    _supabase_or_http_error()
+    global SUPABASE_ENABLED
+    if _using_memory_db():
+        consulta = CONSULTAS_MEM.get(consulta_id)
+        if not consulta:
+            raise HTTPException(status_code=404, detail="Consulta não encontrada")
+        return {
+            "consulta": consulta,
+            "veiculos": VEICULOS_CONSULTA_MEM.get(consulta_id, []),
+        }
+
     try:
         consulta = supabase.table("consultas").select("*").eq("id", consulta_id).single().execute()
         veiculos = supabase.table("veiculos_consulta").select("*").eq("consulta_id", consulta_id).execute()
     except Exception as e:
-        raise HTTPException(status_code=404, detail=f"Consulta não encontrada: {str(e)}")
+        print(f"⚠️ Falha no Supabase ao obter consulta. Fallback memória: {e}")
+        SUPABASE_ENABLED = False
+        consulta_mem = CONSULTAS_MEM.get(consulta_id)
+        if not consulta_mem:
+            raise HTTPException(status_code=404, detail="Consulta não encontrada")
+        return {
+            "consulta": consulta_mem,
+            "veiculos": VEICULOS_CONSULTA_MEM.get(consulta_id, []),
+        }
+
     return {
         "consulta": consulta.data,
         "veiculos": veiculos.data or [],
@@ -200,20 +279,52 @@ def db_get_consulta_com_status(consulta_id: str) -> Dict[str, Any]:
 
 
 def db_get_multas(consulta_id: str) -> List[Dict[str, Any]]:
-    _supabase_or_http_error()
+    global SUPABASE_ENABLED
+    if _using_memory_db():
+        return MULTAS_MEM.get(consulta_id, [])
+
     try:
         resp = supabase.table("multas").select("*").eq("consulta_id", consulta_id).execute()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao buscar multas: {str(e)}")
+        print(f"⚠️ Falha no Supabase ao buscar multas. Fallback memória: {e}")
+        SUPABASE_ENABLED = False
+        return MULTAS_MEM.get(consulta_id, [])
+
     return resp.data or []
 
 
 def db_get_historico() -> List[Dict[str, Any]]:
-    _supabase_or_http_error()
+    global SUPABASE_ENABLED
+    if _using_memory_db():
+        historico = [
+            {
+                "id": consulta["id"],
+                "status": consulta.get("status", "pending"),
+                "total_multas": consulta.get("total_multas", 0),
+                "valor_total": consulta.get("valor_total", 0.0),
+                "created_at": consulta.get("created_at", ""),
+            }
+            for consulta in CONSULTAS_MEM.values()
+        ]
+        return sorted(historico, key=lambda item: item.get("created_at", ""), reverse=True)
+
     try:
         resp = supabase.table("consultas").select("id,status,total_multas,valor_total,created_at").order("created_at", desc=True).execute()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao buscar histórico: {str(e)}")
+        print(f"⚠️ Falha no Supabase ao buscar histórico. Fallback memória: {e}")
+        SUPABASE_ENABLED = False
+        historico = [
+            {
+                "id": consulta["id"],
+                "status": consulta.get("status", "pending"),
+                "total_multas": consulta.get("total_multas", 0),
+                "valor_total": consulta.get("valor_total", 0.0),
+                "created_at": consulta.get("created_at", ""),
+            }
+            for consulta in CONSULTAS_MEM.values()
+        ]
+        return sorted(historico, key=lambda item: item.get("created_at", ""), reverse=True)
+
     return resp.data or []
 
 def converter_multa_para_frontend(multa_dict: Dict) -> Dict:
